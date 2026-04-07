@@ -1,0 +1,384 @@
+-- ============================================================
+-- IPL 2026 DATABASE SCHEMA
+-- Compatible with: SQL Server / PostgreSQL / MySQL
+-- Author: Anagha and Harmeet
+-- Created: 2026
+-- ============================================================
+
+-- ============================================================
+-- SECTION 1: DIMENSION TABLES (Core Entities)
+-- ============================================================
+
+-- Teams
+Create database if not exists IPL2026;
+
+CREATE TABLE Teams (
+    team_id         INT             PRIMARY KEY,
+    team_name       VARCHAR(100)    NOT NULL UNIQUE,
+    short_name      VARCHAR(5)      NOT NULL,
+    home_city       VARCHAR(100),
+    home_venue_id   INT,            -- FK added after Venues table
+    coach           VARCHAR(100),
+    captain_player_id INT,          -- FK added after Players table
+    jersey_color    VARCHAR(50),
+    titles_won      INT             DEFAULT 0,
+    created_at      DATETIME        DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Venues
+CREATE TABLE Venues (
+    venue_id        INT             PRIMARY KEY,
+    venue_name      VARCHAR(150)    NOT NULL,
+    city            VARCHAR(100)    NOT NULL,
+    state           VARCHAR(100),
+    capacity        INT,
+    pitch_type      VARCHAR(50),    -- 'Flat', 'Spin-friendly', 'Pace-friendly', 'Balanced'
+    avg_first_innings_score INT,
+    created_at      DATETIME        DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Players
+CREATE TABLE Players (
+    player_id       INT             PRIMARY KEY,
+    full_name       VARCHAR(150)    NOT NULL,
+    short_name      VARCHAR(80),
+    team_id         INT             NOT NULL,
+    role            VARCHAR(30)     NOT NULL,   -- 'Batsman', 'Bowler', 'All-rounder', 'WK-Batsman'
+    batting_style   VARCHAR(30),               -- 'Right-hand', 'Left-hand'
+    bowling_style   VARCHAR(60),               -- 'Right-arm Fast', 'Left-arm Spin', etc.
+    nationality     VARCHAR(60)     NOT NULL,
+    is_overseas     BIT             DEFAULT 0,
+    base_price_cr   DECIMAL(5,2),              -- In Crore INR
+    sold_price_cr   DECIMAL(6,2),
+    age             INT,
+    debut_year      INT,
+    is_active       BIT             DEFAULT 1,
+    created_at      DATETIME        DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT FK_Players_Teams FOREIGN KEY (team_id) REFERENCES Teams(team_id)
+);
+
+-- Add deferred FKs on Teams now that Players exists
+ALTER TABLE Teams
+    ADD CONSTRAINT FK_Teams_Captain FOREIGN KEY (captain_player_id) REFERENCES Players(player_id);
+
+ALTER TABLE Teams
+    ADD CONSTRAINT FK_Teams_Venue FOREIGN KEY (home_venue_id) REFERENCES Venues(venue_id);
+
+-- Date Dimension (for Power BI time intelligence)
+CREATE TABLE Dim_Date (
+    date_id         INT             PRIMARY KEY,   -- Format: YYYYMMDD
+    full_date       DATE            NOT NULL UNIQUE,
+    day_of_week     VARCHAR(15),
+    day_no          INT,
+    week_no         INT,
+    month_no        INT,
+    month_name      VARCHAR(15),
+    quarter         INT,
+    year            INT,
+    is_weekend      BIT             DEFAULT 0,
+    is_ipl_matchday BIT             DEFAULT 0
+);
+
+
+-- ============================================================
+-- SECTION 2: MATCH FACT TABLES
+-- ============================================================
+
+-- Matches
+CREATE TABLE Matches (
+    match_id            INT             PRIMARY KEY,
+    date_id             INT             NOT NULL,   -- FK to Dim_Date
+    venue_id            INT             NOT NULL,
+    match_type          VARCHAR(20)     NOT NULL,   -- 'League', 'Qualifier 1', 'Eliminator', 'Qualifier 2', 'Final'
+    match_no            INT,                        -- Match number in season
+    team1_id            INT             NOT NULL,
+    team2_id            INT             NOT NULL,
+    toss_winner_id      INT,
+    toss_decision       VARCHAR(10),                -- 'Bat', 'Field'
+    winner_team_id      INT,
+    win_type            VARCHAR(20),                -- 'Runs', 'Wickets', 'Super Over', 'No Result'
+    win_margin          INT,
+    dl_applied          BIT             DEFAULT 0,  -- Duckworth-Lewis
+    mom_player_id       INT,                        -- Man of the Match
+    stadium_condition   VARCHAR(30),                -- 'Day', 'Day-Night', 'Night'
+    created_at          DATETIME        DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT FK_Matches_Date     FOREIGN KEY (date_id)          REFERENCES Dim_Date(date_id),
+    CONSTRAINT FK_Matches_Venue    FOREIGN KEY (venue_id)          REFERENCES Venues(venue_id),
+    CONSTRAINT FK_Matches_Team1    FOREIGN KEY (team1_id)          REFERENCES Teams(team_id),
+    CONSTRAINT FK_Matches_Team2    FOREIGN KEY (team2_id)          REFERENCES Teams(team_id),
+    CONSTRAINT FK_Matches_Winner   FOREIGN KEY (winner_team_id)    REFERENCES Teams(team_id),
+    CONSTRAINT FK_Matches_Toss     FOREIGN KEY (toss_winner_id)    REFERENCES Teams(team_id),
+    CONSTRAINT FK_Matches_MOM      FOREIGN KEY (mom_player_id)     REFERENCES Players(player_id)
+);
+
+-- Match Team Stats (Innings Summary per team per match)
+CREATE TABLE MatchTeamStats (
+    stat_id         INT             PRIMARY KEY,
+    match_id        INT             NOT NULL,
+    team_id         INT             NOT NULL,
+    innings_no      INT             NOT NULL,   -- 1 or 2
+    total_runs      INT             DEFAULT 0,
+    wickets_lost    INT             DEFAULT 0,
+    overs_faced     DECIMAL(5,1),               -- e.g. 20.0, 19.3
+    extras          INT             DEFAULT 0,
+    wides           INT             DEFAULT 0,
+    no_balls        INT             DEFAULT 0,
+    run_rate        DECIMAL(5,2),               -- Computed: runs / overs
+    powerplay_runs  INT,                        -- Overs 1-6
+    middle_runs     INT,                        -- Overs 7-15
+    death_runs      INT,                        -- Overs 16-20
+    highest_partnership INT,
+    CONSTRAINT FK_MTS_Match  FOREIGN KEY (match_id) REFERENCES Matches(match_id),
+    CONSTRAINT FK_MTS_Team   FOREIGN KEY (team_id)  REFERENCES Teams(team_id),
+    CONSTRAINT UQ_MTS        UNIQUE (match_id, team_id, innings_no)
+);
+
+
+-- ============================================================
+-- SECTION 3: PLAYER PERFORMANCE TABLES
+-- ============================================================
+
+-- Batting Stats (per player per match)
+CREATE TABLE BattingStats (
+    stat_id         INT             PRIMARY KEY,
+    match_id        INT             NOT NULL,
+    player_id       INT             NOT NULL,
+    team_id         INT             NOT NULL,
+    innings_no      INT             NOT NULL,
+    batting_position INT,
+    runs            INT             DEFAULT 0,
+    balls_faced     INT             DEFAULT 0,
+    fours           INT             DEFAULT 0,
+    sixes           INT             DEFAULT 0,
+    is_out          BIT             DEFAULT 1,
+    dismissal_type  VARCHAR(30),                -- 'Caught', 'Bowled', 'LBW', 'Run Out', 'Stumped', 'Not Out'
+    dismissed_by    INT,                        -- bowler player_id
+    strike_rate     DECIMAL(6,2),               -- (runs/balls)*100
+    is_fifty        BIT             DEFAULT 0,
+    is_hundred      BIT             DEFAULT 0,
+    CONSTRAINT FK_Bat_Match  FOREIGN KEY (match_id)  REFERENCES Matches(match_id),
+    CONSTRAINT FK_Bat_Player FOREIGN KEY (player_id) REFERENCES Players(player_id),
+    CONSTRAINT FK_Bat_Team   FOREIGN KEY (team_id)   REFERENCES Teams(team_id),
+    CONSTRAINT UQ_Bat        UNIQUE (match_id, player_id, innings_no)
+);
+
+-- Bowling Stats (per player per match)
+CREATE TABLE BowlingStats (
+    stat_id         INT             PRIMARY KEY,
+    match_id        INT             NOT NULL,
+    player_id       INT             NOT NULL,
+    team_id         INT             NOT NULL,
+    innings_no      INT             NOT NULL,
+    overs_bowled    DECIMAL(4,1),               -- e.g. 4.0, 3.3
+    maidens         INT             DEFAULT 0,
+    runs_given      INT             DEFAULT 0,
+    wickets         INT             DEFAULT 0,
+    wides           INT             DEFAULT 0,
+    no_balls        INT             DEFAULT 0,
+    economy         DECIMAL(5,2),               -- runs_given / overs_bowled
+    dot_balls       INT             DEFAULT 0,
+    powerplay_wkts  INT             DEFAULT 0,
+    death_wkts      INT             DEFAULT 0,
+    CONSTRAINT FK_Bowl_Match  FOREIGN KEY (match_id)  REFERENCES Matches(match_id),
+    CONSTRAINT FK_Bowl_Player FOREIGN KEY (player_id) REFERENCES Players(player_id),
+    CONSTRAINT FK_Bowl_Team   FOREIGN KEY (team_id)   REFERENCES Teams(team_id),
+    CONSTRAINT UQ_Bowl        UNIQUE (match_id, player_id, innings_no)
+);
+
+-- Fielding Stats (per player per match)
+CREATE TABLE FieldingStats (
+    stat_id         INT             PRIMARY KEY,
+    match_id        INT             NOT NULL,
+    player_id       INT             NOT NULL,
+    team_id         INT             NOT NULL,
+    catches         INT             DEFAULT 0,
+    run_outs        INT             DEFAULT 0,
+    stumpings       INT             DEFAULT 0,
+    dropped_catches INT             DEFAULT 0,
+    CONSTRAINT FK_Field_Match  FOREIGN KEY (match_id)  REFERENCES Matches(match_id),
+    CONSTRAINT FK_Field_Player FOREIGN KEY (player_id) REFERENCES Players(player_id),
+    CONSTRAINT FK_Field_Team   FOREIGN KEY (team_id)   REFERENCES Teams(team_id),
+    CONSTRAINT UQ_Field        UNIQUE (match_id, player_id)
+);
+
+-- Ball by Ball (Most granular — optional for phase analysis)
+CREATE TABLE BallByBall (
+    ball_id         BIGINT          PRIMARY KEY,
+    match_id        INT             NOT NULL,
+    innings_no      INT             NOT NULL,
+    over_no         INT             NOT NULL,   -- 1 to 20
+    ball_no         INT             NOT NULL,   -- 1 to 6 (+ extras)
+    batsman_id      INT             NOT NULL,
+    non_striker_id  INT,
+    bowler_id       INT             NOT NULL,
+    runs_scored     INT             DEFAULT 0,
+    extras          INT             DEFAULT 0,
+    is_wide         BIT             DEFAULT 0,
+    is_no_ball      BIT             DEFAULT 0,
+    is_boundary     BIT             DEFAULT 0,  -- 4 runs
+    is_six          BIT             DEFAULT 0,  -- 6 runs
+    is_dot_ball     BIT             DEFAULT 0,
+    is_wicket       BIT             DEFAULT 0,
+    dismissal_type  VARCHAR(30),
+    fielder_id      INT,                        -- player who took catch/run-out
+    cumulative_runs INT,                        -- Running total at that ball
+    match_phase     VARCHAR(15),                -- 'Powerplay', 'Middle', 'Death'
+    CONSTRAINT FK_BBB_Match    FOREIGN KEY (match_id)      REFERENCES Matches(match_id),
+    CONSTRAINT FK_BBB_Batsman  FOREIGN KEY (batsman_id)    REFERENCES Players(player_id),
+    CONSTRAINT FK_BBB_Bowler   FOREIGN KEY (bowler_id)     REFERENCES Players(player_id),
+    CONSTRAINT FK_BBB_Fielder  FOREIGN KEY (fielder_id)    REFERENCES Players(player_id),
+    CONSTRAINT UQ_BBB          UNIQUE (match_id, innings_no, over_no, ball_no)
+);
+
+
+-- ============================================================
+-- SECTION 4: STANDINGS & POINTS TABLE
+-- ============================================================
+
+CREATE TABLE PointsTable (
+    points_id       INT             PRIMARY KEY,
+    team_id         INT             NOT NULL UNIQUE,
+    matches_played  INT             DEFAULT 0,
+    wins            INT             DEFAULT 0,
+    losses          INT             DEFAULT 0,
+    no_results      INT             DEFAULT 0,
+    points          INT             DEFAULT 0,   -- Win=2, NR=1, Loss=0
+    runs_for        INT             DEFAULT 0,
+    overs_for       DECIMAL(6,1),
+    runs_against    INT             DEFAULT 0,
+    overs_against   DECIMAL(6,1),
+    nrr             DECIMAL(6,4),               -- Net Run Rate
+    last_updated    DATETIME        DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT FK_PT_Team FOREIGN KEY (team_id) REFERENCES Teams(team_id)
+);
+
+
+-- ============================================================
+-- SECTION 5: INDEXES (for Power BI query performance)
+-- ============================================================
+
+-- Matches
+CREATE INDEX IX_Matches_Date       ON Matches(date_id);
+CREATE INDEX IX_Matches_Venue      ON Matches(venue_id);
+CREATE INDEX IX_Matches_Team1      ON Matches(team1_id);
+CREATE INDEX IX_Matches_Team2      ON Matches(team2_id);
+CREATE INDEX IX_Matches_Winner     ON Matches(winner_team_id);
+
+-- BattingStats
+CREATE INDEX IX_Bat_Player         ON BattingStats(player_id);
+CREATE INDEX IX_Bat_Match          ON BattingStats(match_id);
+CREATE INDEX IX_Bat_Team           ON BattingStats(team_id);
+
+-- BowlingStats
+CREATE INDEX IX_Bowl_Player        ON BowlingStats(player_id);
+CREATE INDEX IX_Bowl_Match         ON BowlingStats(match_id);
+CREATE INDEX IX_Bowl_Team          ON BowlingStats(team_id);
+
+-- BallByBall
+CREATE INDEX IX_BBB_Match          ON BallByBall(match_id);
+CREATE INDEX IX_BBB_Batsman        ON BallByBall(batsman_id);
+CREATE INDEX IX_BBB_Bowler         ON BallByBall(bowler_id);
+CREATE INDEX IX_BBB_Phase          ON BallByBall(match_id, match_phase);
+
+-- Players
+CREATE INDEX IX_Players_Team       ON Players(team_id);
+CREATE INDEX IX_Players_Role       ON Players(role);
+
+
+-- ============================================================
+-- SECTION 6: USEFUL VIEWS (Pre-built for Power BI Import)
+-- ============================================================
+
+-- Orange Cap Leaderboard
+CREATE VIEW vw_OrangeCap AS
+SELECT
+    p.player_id,
+    p.full_name,
+    t.short_name                        AS team,
+    SUM(b.runs)                         AS total_runs,
+    SUM(b.balls_faced)                  AS total_balls,
+    COUNT(b.stat_id)                    AS innings,
+    MAX(b.runs)                         AS highest_score,
+    SUM(b.fours)                        AS total_fours,
+    SUM(b.sixes)                        AS total_sixes,
+    SUM(CASE WHEN b.is_fifty = 1 THEN 1 ELSE 0 END) AS fifties,
+    SUM(CASE WHEN b.is_hundred = 1 THEN 1 ELSE 0 END) AS hundreds,
+    ROUND(SUM(b.runs) * 100.0 / NULLIF(SUM(b.balls_faced), 0), 2) AS strike_rate,
+    ROUND(SUM(b.runs) * 1.0 / NULLIF(COUNT(b.stat_id), 0), 2)     AS avg_runs
+FROM BattingStats b
+JOIN Players p ON b.player_id = p.player_id
+JOIN Teams t   ON p.team_id   = t.team_id
+GROUP BY p.player_id, p.full_name, t.short_name;
+
+-- Purple Cap Leaderboard
+CREATE VIEW vw_PurpleCap AS
+SELECT
+    p.player_id,
+    p.full_name,
+    t.short_name                        AS team,
+    SUM(bw.wickets)                     AS total_wickets,
+    SUM(bw.overs_bowled)                AS total_overs,
+    SUM(bw.runs_given)                  AS total_runs_given,
+    SUM(bw.maidens)                     AS total_maidens,
+    SUM(bw.dot_balls)                   AS total_dots,
+    ROUND(SUM(bw.runs_given) / NULLIF(SUM(bw.overs_bowled), 0), 2) AS economy,
+    ROUND(SUM(bw.overs_bowled) * 6.0 / NULLIF(SUM(bw.wickets), 0), 2) AS strike_rate
+FROM BowlingStats bw
+JOIN Players p ON bw.player_id = p.player_id
+JOIN Teams t   ON p.team_id    = t.team_id
+GROUP BY p.player_id, p.full_name, t.short_name;
+
+-- Team Win/Loss Summary
+CREATE VIEW vw_TeamSummary AS
+SELECT
+    t.team_id,
+    t.team_name,
+    t.short_name,
+    COUNT(m.match_id)                                           AS matches_played,
+    SUM(CASE WHEN m.winner_team_id = t.team_id THEN 1 ELSE 0 END) AS wins,
+    SUM(CASE WHEN m.winner_team_id != t.team_id AND m.win_type != 'No Result' THEN 1 ELSE 0 END) AS losses,
+    SUM(CASE WHEN m.win_type = 'No Result' THEN 1 ELSE 0 END)  AS no_results,
+    ROUND(SUM(CASE WHEN m.winner_team_id = t.team_id THEN 1.0 ELSE 0 END) / NULLIF(COUNT(m.match_id), 0) * 100, 1) AS win_pct
+FROM Teams t
+LEFT JOIN Matches m ON (m.team1_id = t.team_id OR m.team2_id = t.team_id)
+GROUP BY t.team_id, t.team_name, t.short_name;
+
+-- Phase-wise Batting Analysis (Powerplay / Middle / Death)
+CREATE VIEW vw_PhaseAnalysis AS
+SELECT
+    m.match_id,
+    t.short_name                    AS team,
+    b.match_phase,
+    SUM(b.runs_scored)              AS phase_runs,
+    COUNT(b.ball_id)                AS balls,
+    SUM(CASE WHEN b.is_wicket = 1 THEN 1 ELSE 0 END) AS wickets,
+    SUM(CASE WHEN b.is_boundary = 1 THEN 1 ELSE 0 END) AS fours,
+    SUM(CASE WHEN b.is_six = 1 THEN 1 ELSE 0 END) AS sixes,
+    SUM(CASE WHEN b.is_dot_ball = 1 THEN 1 ELSE 0 END) AS dots
+FROM BallByBall b
+JOIN Matches m   ON b.match_id   = m.match_id
+JOIN Players bat ON b.batsman_id = bat.player_id
+JOIN Teams t     ON bat.team_id  = t.team_id
+GROUP BY m.match_id, t.short_name, b.match_phase;
+
+-- Venue Stats Summary
+CREATE VIEW vw_VenueStats AS
+SELECT
+    v.venue_id,
+    v.venue_name,
+    v.city,
+    v.pitch_type,
+    COUNT(m.match_id)               AS matches_hosted,
+    AVG(s1.total_runs)              AS avg_first_innings_score,
+    AVG(s2.total_runs)              AS avg_second_innings_score,
+    SUM(CASE WHEN m.toss_decision = 'Bat' AND m.toss_winner_id = m.winner_team_id THEN 1 ELSE 0 END) AS bat_first_wins,
+    SUM(CASE WHEN m.toss_decision = 'Field' AND m.toss_winner_id = m.winner_team_id THEN 1 ELSE 0 END) AS field_first_wins
+FROM Venues v
+LEFT JOIN Matches m       ON v.venue_id = m.venue_id
+LEFT JOIN MatchTeamStats s1 ON m.match_id = s1.match_id AND s1.innings_no = 1
+LEFT JOIN MatchTeamStats s2 ON m.match_id = s2.match_id AND s2.innings_no = 2
+GROUP BY v.venue_id, v.venue_name, v.city, v.pitch_type;
+
+-- ============================================================
+-- END OF SCHEMA
+-- ============================================================
