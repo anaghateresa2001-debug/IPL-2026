@@ -1,0 +1,344 @@
+-- ============================================================
+-- REAL MATCH DATA — RCB vs SRH, TATA IPL 2026
+-- Venue  : M Chinnaswamy Stadium, Bengaluru
+-- Result : RCB won by 6 wickets (15.4 overs)
+-- MOM    : Jacob Duffy (RCB)
+-- Source : Official scorecard
+-- ============================================================
+ 
+USE DATABASE IPL2026;
+USE SCHEMA IPL2026.PUBLIC;
+ 
+-- ============================================================
+-- STEP 1: NEW PLAYERS NOT IN SEED DATA
+-- Real squads differ from our sample — inserting actuals.
+-- IDs 2001+ reserved for real-data players.
+-- ============================================================
+ 
+-- SRH new players
+INSERT INTO Players (player_id, full_name, short_name, team_id, role, batting_style, bowling_style, nationality, is_overseas, age, debut_year) VALUES
+(2001, 'Salil Arora',     'S.Arora',  7, 'All-rounder', 'Right-hand', 'Right-arm Fast-medium', 'Indian',      FALSE, 24, 2024),
+(2002, 'Aniket Verma',    'A.Verma',  7, 'Batsman',     'Right-hand', 'Right-arm Off-break',   'Indian',      FALSE, 22, 2024),
+(2003, 'Harsh Dubey',     'H.Dubey',  7, 'Bowler',      'Right-hand', 'Right-arm Off-break',   'Indian',      FALSE, 23, 2024),
+(2004, 'David Payne',     'D.Payne',  7, 'Bowler',      'Left-hand',  'Left-arm Fast-medium',  'English',     TRUE,  32, 2024),
+(2005, 'Eshan Malinga',   'E.Malinga',7, 'Bowler',      'Right-hand', 'Right-arm Fast',        'Sri Lankan',  TRUE,  22, 2026);
+ 
+-- RCB new players
+INSERT INTO Players (player_id, full_name, short_name, team_id, role, batting_style, bowling_style, nationality, is_overseas, age, debut_year) VALUES
+(2006, 'Phil Salt',        'P.Salt',   3, 'WK-Batsman',  'Right-hand', NULL,                    'English',     TRUE,  27, 2023),
+(2007, 'Devdutt Padikkal', 'Padikkal', 3, 'Batsman',     'Left-hand',  'Right-arm Off-break',   'Indian',      FALSE, 24, 2020),
+(2008, 'Jitesh Sharma',    'J.Sharma', 3, 'WK-Batsman',  'Right-hand', NULL,                    'Indian',      FALSE, 30, 2022),
+(2009, 'Abhinandan Singh', 'Abhinandan',3,'Bowler',      'Right-hand', 'Right-arm Fast-medium', 'Indian',      FALSE, 23, 2026),
+(2010, 'Jacob Duffy',      'J.Duffy',  3, 'Bowler',      'Right-hand', 'Right-arm Fast',        'New Zealander',TRUE, 28, 2026);
+ 
+-- Players from other teams playing for different franchises (real IPL 2026 squads)
+-- Updating team_id for players reassigned vs our seed data
+-- Bhuvneshwar Kumar plays for RCB in this match (was SRH in seed)
+-- Krunal Pandya plays for RCB (was LSG in seed)
+-- Tim David plays for RCB (was MI in seed)
+-- Romario Shepherd plays for RCB (was MI in seed)
+-- Suyash Sharma plays for RCB (was KKR in seed)
+-- Note: In a production DB you'd have a PlayerTeamHistory table.
+-- For this dashboard we insert them as RCB players with new IDs.
+ 
+INSERT INTO Players (player_id, full_name, short_name, team_id, role, batting_style, bowling_style, nationality, is_overseas, age, debut_year) VALUES
+(2011, 'Bhuvneshwar Kumar', 'Bhuvi',   3, 'Bowler',      'Right-hand', 'Right-arm Fast-medium', 'Indian',      FALSE, 34, 2013),
+(2012, 'Krunal Pandya',     'K.Pandya',3, 'All-rounder', 'Left-hand',  'Left-arm Orthodox',     'Indian',      FALSE, 32, 2016),
+(2013, 'Tim David',         'Tim',     3, 'Batsman',     'Right-hand', 'Right-arm Medium',      'Singaporean', TRUE,  28, 2022),
+(2014, 'Romario Shepherd',  'Shepherd',3, 'All-rounder', 'Right-hand', 'Right-arm Fast',        'West Indian', TRUE,  27, 2023),
+(2015, 'Suyash Sharma',     'S.Sharma',3, 'Bowler',      'Right-hand', 'Right-arm Leg-break',   'Indian',      FALSE, 21, 2024);
+ 
+ 
+-- ============================================================
+-- STEP 2: DIM_DATE — Match date
+-- ============================================================
+ 
+INSERT INTO Dim_Date (date_id, full_date, day_of_week, day_no, week_no, month_no, month_name, quarter, year, is_weekend, is_ipl_matchday)
+SELECT 20260405, '2026-04-05', 'Sunday', 5, 14, 4, 'April', 2, 2026, TRUE, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM Dim_Date WHERE date_id = 20260405);
+ 
+ 
+-- ============================================================
+-- STEP 3: MATCH
+-- match_id = 101 (real matches start from 101 to avoid
+--             collision with the 10 sample matches)
+-- ============================================================
+ 
+INSERT INTO Matches (
+    match_id, date_id, venue_id, match_type, match_no,
+    team1_id, team2_id,
+    toss_winner_id, toss_decision,
+    winner_team_id, win_type, win_margin,
+    dl_applied, mom_player_id, stadium_condition
+) VALUES (
+    101,        -- match_id
+    20260405,   -- date_id
+    3,          -- M Chinnaswamy Stadium
+    'League',   -- match_type
+    NULL,       -- match_no (not specified in scorecard)
+    3,          -- team1_id: RCB
+    7,          -- team2_id: SRH
+    3,          -- toss_winner: RCB
+    'Field',    -- toss_decision: elected to field
+    3,          -- winner: RCB
+    'Wickets',  -- win_type
+    6,          -- win_margin: 6 wickets
+    FALSE,      -- dl_applied
+    2010,       -- mom_player_id: Jacob Duffy
+    'Day-Night' -- stadium_condition
+);
+ 
+ 
+-- ============================================================
+-- STEP 4: MATCH TEAM STATS
+-- Innings 1: SRH 201/9 in 20.0 overs
+-- Innings 2: RCB 203/4 in 15.4 overs
+--
+-- Phase run estimation from Fall of Wickets:
+-- SRH Inn1:
+--   Powerplay (ov 1-6)  : FOW at 18(2.1),23(2.6),29(4.2) → ~50 runs
+--   Middle    (ov 7-15) : score went 29→155 across overs 5–15 → ~105 runs
+--   Death     (ov 16-20): 201 - 50 - 105 = 46 runs
+-- RCB Inn2:
+--   Powerplay (ov 1-6)  : Salt out 1.1 (9), Kohli+Padikkal ~65 by over 6 → ~65
+--   Middle    (ov 7-15) : FOW 110(8.4),163(12.2),163(12.3) → ~98 runs
+--   Death     (ov 16+)  : only 15.4 overs so no death phase → 0
+-- ============================================================
+ 
+INSERT INTO MatchTeamStats (
+    stat_id, match_id, team_id, innings_no,
+    total_runs, wickets_lost, overs_faced,
+    extras, wides, no_balls,
+    run_rate, powerplay_runs, middle_runs, death_runs,
+    highest_partnership
+) VALUES
+-- Innings 1: SRH
+(1001, 101, 7, 1,
+ 201, 9,  20.0,
+ 6,   4,  0,
+ 10.05, 50, 105, 46,
+ 97),   -- Klaasen-Ishan partnership
+ 
+-- Innings 2: RCB
+(1002, 101, 3, 2,
+ 203, 4,  15.4,
+ 18,  7,  0,
+ 12.96, 65, 98, 40,
+ 101);  -- Kohli-Padikkal partnership
+ 
+ 
+-- ============================================================
+-- STEP 5: BATTING STATS
+-- ============================================================
+ 
+-- INNINGS 1: SRH Batting
+INSERT INTO BattingStats (
+    stat_id, match_id, player_id, team_id, innings_no,
+    batting_position, runs, balls_faced, fours, sixes,
+    is_out, dismissal_type, dismissed_by,
+    strike_rate, is_fifty, is_hundred
+) VALUES
+-- Travis Head — c Phil Salt b Jacob Duffy
+(2001, 101, 703,  7, 1, 1,  11,  9,  2, 0, TRUE,  'Caught',  2010,  122.22, FALSE, FALSE),
+ 
+-- Abhishek Sharma — c Jitesh Sharma b Jacob Duffy
+(2002, 101, 704,  7, 1, 2,  7,   8,  0, 1, TRUE,  'Caught',  2010,  87.50,  FALSE, FALSE),
+ 
+-- Ishan Kishan (c)(wk) — c Phil Salt b Abhinandan Singh
+(2003, 101, 712,  7, 1, 3,  80,  38, 8, 5, TRUE,  'Caught',  2009,  210.53, TRUE,  FALSE),
+ 
+-- Nitish Kumar Reddy — c Abhinandan Singh b Jacob Duffy
+(2004, 101, 705,  7, 1, 4,  1,   6,  0, 0, TRUE,  'Caught',  2010,  16.67,  FALSE, FALSE),
+ 
+-- Heinrich Klaasen — c Phil Salt b Romario Shepherd
+(2005, 101, 702,  7, 1, 5,  31,  22, 2, 1, TRUE,  'Caught',  2014,  140.91, FALSE, FALSE),
+ 
+-- Salil Arora — c Devdutt Padikkal b Suyash Sharma
+(2006, 101, 2001, 7, 1, 6,  9,   6,  0, 1, TRUE,  'Caught',  2015,  150.00, FALSE, FALSE),
+ 
+-- Aniket Verma — c Virat Kohli b Romario Shepherd
+(2007, 101, 2002, 7, 1, 7,  43,  18, 3, 4, TRUE,  'Caught',  2014,  238.89, FALSE, FALSE),
+ 
+-- Harsh Dubey — c Devdutt Padikkal b Romario Shepherd
+(2008, 101, 2003, 7, 1, 8,  3,   3,  0, 0, TRUE,  'Caught',  2014,  100.00, FALSE, FALSE),
+ 
+-- Harshal Patel — c Devdutt Padikkal b Bhuvneshwar Kumar
+(2009, 101, 720,  7, 1, 9,  0,   2,  0, 0, TRUE,  'Caught',  2011,  0.00,   FALSE, FALSE),
+ 
+-- David Payne — not out
+(2010, 101, 2004, 7, 1, 10, 6,   5,  0, 0, FALSE, 'Not Out', NULL,  120.00, FALSE, FALSE),
+ 
+-- Jaydev Unadkat — not out
+(2011, 101, 714,  7, 1, 11, 4,   3,  0, 0, FALSE, 'Not Out', NULL,  133.33, FALSE, FALSE);
+ 
+ 
+-- INNINGS 2: RCB Batting
+INSERT INTO BattingStats (
+    stat_id, match_id, player_id, team_id, innings_no,
+    batting_position, runs, balls_faced, fours, sixes,
+    is_out, dismissal_type, dismissed_by,
+    strike_rate, is_fifty, is_hundred
+) VALUES
+-- Phil Salt — c Heinrich Klaasen b Jaydev Unadkat
+(2012, 101, 2006, 3, 2, 1,  8,   7,  2, 0, TRUE,  'Caught',  714,   114.29, FALSE, FALSE),
+ 
+-- Virat Kohli — not out
+(2013, 101, 301,  3, 2, 2,  69,  38, 5, 5, FALSE, 'Not Out', NULL,  181.58, TRUE,  FALSE),
+ 
+-- Devdutt Padikkal — c Heinrich Klaasen b Harsh Dubey
+(2014, 101, 2007, 3, 2, 3,  61,  26, 7, 4, TRUE,  'Caught',  2003,  234.62, TRUE,  FALSE),
+ 
+-- Rajat Patidar (c) — c Harsh Dubey b David Payne
+(2015, 101, 302,  3, 2, 4,  31,  12, 2, 3, TRUE,  'Caught',  2004,  258.33, FALSE, FALSE),
+ 
+-- Jitesh Sharma (wk) — c Jaydev Unadkat b David Payne
+(2016, 101, 2008, 3, 2, 5,  0,   1,  0, 0, TRUE,  'Caught',  2004,  0.00,   FALSE, FALSE),
+ 
+-- Tim David — not out
+(2017, 101, 2013, 3, 2, 6,  16,  10, 1, 1, FALSE, 'Not Out', NULL,  160.00, FALSE, FALSE);
+ 
+ 
+-- ============================================================
+-- STEP 6: BOWLING STATS
+-- ============================================================
+ 
+-- INNINGS 1: RCB Bowlers vs SRH
+INSERT INTO BowlingStats (
+    stat_id, match_id, player_id, team_id, innings_no,
+    overs_bowled, maidens, runs_given, wickets,
+    wides, no_balls, economy, dot_balls,
+    powerplay_wkts, death_wkts
+) VALUES
+-- Jacob Duffy — 4-0-22-3
+(3001, 101, 2010, 3, 1, 4.0, 0, 22, 3, 0, 0, 5.50,  13, 2, 0),
+ 
+-- Bhuvneshwar Kumar — 4-0-31-1
+(3002, 101, 2011, 3, 1, 4.0, 0, 31, 1, 1, 0, 7.75,  9,  0, 1),
+ 
+-- Abhinandan Singh — 3-0-38-1
+(3003, 101, 2009, 3, 1, 3.0, 0, 38, 1, 0, 0, 12.67, 7,  1, 0),
+ 
+-- Romario Shepherd — 4-0-54-3
+(3004, 101, 2014, 3, 1, 4.0, 0, 54, 3, 1, 0, 13.50, 5,  0, 2),
+ 
+-- Suyash Sharma — 3-0-28-1
+(3005, 101, 2015, 3, 1, 3.0, 0, 28, 1, 1, 0, 9.33,  6,  0, 0),
+ 
+-- Krunal Pandya — 2-0-26-0
+(3006, 101, 2012, 3, 1, 2.0, 0, 26, 0, 1, 0, 13.00, 1,  0, 0);
+ 
+ 
+-- INNINGS 2: SRH Bowlers vs RCB
+INSERT INTO BowlingStats (
+    stat_id, match_id, player_id, team_id, innings_no,
+    overs_bowled, maidens, runs_given, wickets,
+    wides, no_balls, economy, dot_balls,
+    powerplay_wkts, death_wkts
+) VALUES
+-- Nitish Kumar Reddy — 2-0-19-0
+(3007, 101, 705,  7, 2, 2.0, 0, 19, 0, 0, 0, 9.50,  5, 0, 0),
+ 
+-- Jaydev Unadkat — 3-0-29-1
+(3008, 101, 714,  7, 2, 3.0, 0, 29, 1, 1, 0, 9.67,  6, 1, 0),
+ 
+-- David Payne — 3-0-35-2
+(3009, 101, 2004, 7, 2, 3.0, 0, 35, 2, 1, 0, 11.67, 5, 0, 0),
+ 
+-- Harsh Dubey — 3-0-35-1
+(3010, 101, 2003, 7, 2, 3.0, 0, 35, 1, 2, 0, 11.67, 4, 0, 0),
+ 
+-- Eshan Malinga (Impact Player) — 2-0-35-0
+(3011, 101, 2005, 7, 2, 2.0, 0, 35, 0, 2, 0, 17.50, 3, 0, 0),
+ 
+-- Harshal Patel — 2.4-0-39-0
+(3012, 101, 720,  7, 2, 2.4, 0, 39, 0, 1, 0, 14.63, 3, 0, 0);
+ 
+ 
+-- ============================================================
+-- STEP 7: FIELDING STATS
+-- (Catches credited from dismissal records)
+-- ============================================================
+ 
+INSERT INTO FieldingStats (
+    stat_id, match_id, player_id, team_id,
+    catches, run_outs, stumpings, dropped_catches
+) VALUES
+-- RCB fielders (catching SRH batters in Inn 1)
+(4001, 101, 2006, 3, 3, 0, 0, 0),  -- Phil Salt: caught Head, Klaasen, Ishan
+(4002, 101, 2007, 3, 3, 0, 0, 0),  -- Devdutt Padikkal: caught Salil, Harsh, Harshal
+(4003, 101, 301,  3, 1, 0, 0, 0),  -- Virat Kohli: caught Aniket Verma
+(4004, 101, 2009, 3, 1, 0, 0, 0),  -- Abhinandan Singh: caught Nitish Reddy
+ 
+-- SRH fielders (catching RCB batters in Inn 2)
+(4005, 101, 702,  7, 2, 0, 0, 0),  -- Heinrich Klaasen: caught Padikkal, Salt
+(4006, 101, 2003, 7, 1, 0, 0, 0),  -- Harsh Dubey: caught Patidar
+(4007, 101, 714,  7, 1, 0, 0, 0);  -- Jaydev Unadkat: caught Jitesh Sharma
+ 
+ 
+-- ============================================================
+-- STEP 8: UPDATE POINTS TABLE
+-- RCB win → +2 pts for RCB, +0 for SRH
+-- NRR change: approximate
+-- ============================================================
+ 
+-- RCB (team_id = 3)
+UPDATE PointsTable SET
+    matches_played = matches_played + 1,
+    wins           = wins + 1,
+    points         = points + 2,
+    runs_for       = runs_for + 203,
+    overs_for      = overs_for + 15.4,
+    runs_against   = runs_against + 201,
+    overs_against  = overs_against + 20.0,
+    last_updated   = CURRENT_TIMESTAMP()
+WHERE team_id = 3;
+ 
+-- SRH (team_id = 7)
+UPDATE PointsTable SET
+    matches_played = matches_played + 1,
+    losses         = losses + 1,
+    runs_for       = runs_for + 201,
+    overs_for      = overs_for + 20.0,
+    runs_against   = runs_against + 203,
+    overs_against  = overs_against + 15.4,
+    last_updated   = CURRENT_TIMESTAMP()
+WHERE team_id = 7;
+ 
+-- ============================================================
+-- VERIFICATION QUERIES — Run after inserts to validate
+-- ============================================================
+ 
+-- Check match inserted correctly
+SELECT match_id, team1_id, team2_id, winner_team_id, win_type, win_margin, mom_player_id
+FROM Matches WHERE match_id = 101;
+ 
+-- Check innings totals
+SELECT m.match_id, t.short_name, s.innings_no, s.total_runs, s.wickets_lost,
+       s.overs_faced, s.run_rate, s.powerplay_runs, s.middle_runs, s.death_runs
+FROM MatchTeamStats s
+JOIN Teams t ON s.team_id = t.team_id
+JOIN Matches m ON s.match_id = m.match_id
+WHERE s.match_id = 101
+ORDER BY s.innings_no;
+ 
+-- Check top scorers this match
+SELECT p.full_name, t.short_name, b.runs, b.balls_faced, b.fours, b.sixes,
+       b.strike_rate, b.dismissal_type
+FROM BattingStats b
+JOIN Players p ON b.player_id = p.player_id
+JOIN Teams   t ON b.team_id   = t.team_id
+WHERE b.match_id = 101
+ORDER BY b.innings_no, b.batting_position;
+ 
+-- Check bowling figures
+SELECT p.full_name, t.short_name, bw.overs_bowled, bw.runs_given,
+       bw.wickets, bw.economy, bw.dot_balls
+FROM BowlingStats bw
+JOIN Players p ON bw.player_id = p.player_id
+JOIN Teams   t ON bw.team_id   = t.team_id
+WHERE bw.match_id = 101
+ORDER BY bw.innings_no, bw.wickets DESC;
+ 
+-- ============================================================
+-- END — RCB vs SRH Match Insert
+-- ============================================================
